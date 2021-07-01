@@ -1,5 +1,5 @@
 # Org.FastHtmlToPdf
-
+```csharp
 try (var pdf = new FastHtmlToImage()) {
     var doc = new ImageDocument();
     var result = pdf.convert(doc, html);
@@ -49,3 +49,4 @@ try (var pdf = new FastHtmlToPdf()) {
         e.printStackTrace();
     }
 }
+```
