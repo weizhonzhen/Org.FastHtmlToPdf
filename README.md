@@ -3,20 +3,6 @@
 try (var pdf = new FastHtmlToImage()) {
     var doc = new ImageDocument();
     var result = pdf.convert(doc, html);
-    long endTime = System.currentTimeMillis();
-    var path = "D:\\tset\\test" + i + ".pdf";
-    var file = new File(path);
-    try
-    {
-        var stream = new FileOutputStream(file);
-        stream.write(result);
-        stream.flush();
-        stream.close();
-    }
-    catch (Exception e)
-    {
-        e.printStackTrace();
-    }
 }
 
 try (var pdf = new FastHtmlToPdf()) {
@@ -34,19 +20,5 @@ try (var pdf = new FastHtmlToPdf()) {
     doc.setFooter(footer);
 
     var result = pdf.convert(doc, html);
-    long endTime = System.currentTimeMillis();
-    var path = "D:\\tset\\test" + i + ".pdf";
-    var file = new File(path);
-    try
-    {
-        var stream = new FileOutputStream(file);
-        stream.write(result);
-        stream.flush();
-        stream.close();
-    }
-    catch (Exception e)
-    {
-        e.printStackTrace();
-    }
 }
 ```
