@@ -28,7 +28,7 @@ public class FastHtmlToImage implements Closeable {
     private HtmlToImage htmlToImage = null;
     private Pointer global_settings = Pointer.NULL;
     private Pointer converter = Pointer.NULL;
-    private String fileName = String.format("%sFastHtmlToImage\\%s.dll", System.getProperty("java.io.tmpdir"), UUID.randomUUID());
+    private String fileName = String.format("%sFastHtmlToImage\\wkhtmltox.dll", System.getProperty("java.io.tmpdir"));
     private String zipName = String.format("%sFastHtmlToImage\\wkhtmltox.zip", System.getProperty("java.io.tmpdir"));
 
     public FastHtmlToImage(){
@@ -49,11 +49,7 @@ public class FastHtmlToImage implements Closeable {
     public void close() {
         if (converter != Pointer.NULL)
             htmlToImage.wkhtmltoimage_destroy_converter(converter);
-        htmlToImage.wkhtmltoimage_deinit();
-        global_settings = Pointer.NULL;
-        converter = Pointer.NULL;
-        System.gc();
-        ImgUtil.close();
+        System.runFinalization();
     }
 
     public byte[] convert(ImageDocument doc, String html){
@@ -76,7 +72,7 @@ public class FastHtmlToImage implements Closeable {
 
         converter = htmlToImage.wkhtmltoimage_create_converter(global_settings, html.getBytes(StandardCharsets.UTF_8));
 
-        if (htmlToImage.wkhtmltoimage_convert(converter) != 0){
+        if (htmlToImage.wkhtmltoimage_convert(converter) ==1){
             PointerByReference pointerByReference = new PointerByReference();
             long len = htmlToImage.wkhtmltoimage_get_output(converter, pointerByReference);
             byte[] result = pointerByReference.getValue().getByteArray(0, (int) len);
@@ -89,20 +85,15 @@ public class FastHtmlToImage implements Closeable {
 }
 
 class ImgUtil{
-    public static synchronized void close() {
-        File file = new File(String.format("%s\\FastHtmlToImage", System.getProperty("java.io.tmpdir")));
-        if (file.exists())
-            Arrays.stream(file.listFiles()).forEach(a -> {
-                if (!a.getName().contains("zip"))
-                    a.delete();
-            });
-    }
-
     public static synchronized void create(String fileName,String zipName){
         URL url = Thread.currentThread().getContextClassLoader().getResource("wkhtmltox.zip");
         File file = new File(String.format("%s\\FastHtmlToImage", System.getProperty("java.io.tmpdir")));
         if (!file.exists())
             file.mkdirs();
+
+        file = new File(fileName);
+        if (file.exists())
+            return;
 
         assert url != null;
         if(url.getPath().contains("BOOT-INF")) {
@@ -125,6 +116,9 @@ class ImgUtil{
 
         if ("jar".equals(url.getProtocol()))
             jarZip(url, fileName,zipName);
+
+        file = new File(zipName);
+        file.delete();
     }
 
     private static void fileZip(URL url, String fileName){

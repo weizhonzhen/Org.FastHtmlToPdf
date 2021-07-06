@@ -4,6 +4,7 @@ import Org.FastHtmlToPdf.Interop.HtmlToPdf;
 import Org.FastHtmlToPdf.Model.PdfDocument;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.sun.jna.ptr.ByteByReference;
 import com.sun.jna.ptr.PointerByReference;
 import java.io.*;
 import java.net.JarURLConnection;
@@ -23,7 +24,7 @@ public class FastHtmlToPdf implements Closeable {
     private Pointer global_settings = Pointer.NULL;
     private Pointer converter = Pointer.NULL;
     private Pointer object_settings = Pointer.NULL;
-    private String fileName = String.format("%sFastHtmlToPdf\\%s.dll", System.getProperty("java.io.tmpdir"), UUID.randomUUID());
+    private String fileName = String.format("%sFastHtmlToPdf\\wkhtmltox.dll", System.getProperty("java.io.tmpdir"));
     private String zipName = String.format("%sFastHtmlToPdf\\wkhtmltox.zip", System.getProperty("java.io.tmpdir"));
 
     public FastHtmlToPdf() {
@@ -32,6 +33,7 @@ public class FastHtmlToPdf implements Closeable {
         htmlToPdf.wkhtmltopdf_init(0);
         global_settings = htmlToPdf.wkhtmltopdf_create_global_settings();
         converter = htmlToPdf.wkhtmltopdf_create_converter(global_settings);
+
         object_settings = htmlToPdf.wkhtmltopdf_create_object_settings();
 
         htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "web.defaultEncoding", "utf-8");
@@ -46,15 +48,7 @@ public class FastHtmlToPdf implements Closeable {
     public void close() {
         if (converter != Pointer.NULL)
             htmlToPdf.wkhtmltopdf_destroy_converter(converter);
-        htmlToPdf.wkhtmltopdf_destroy_global_settings(global_settings);
-        htmlToPdf.wkhtmltopdf_destroy_object_settings(object_settings);
-        htmlToPdf.wkhtmltopdf_deinit();
-        global_settings = Pointer.NULL;
-        converter = Pointer.NULL;
-        object_settings = Pointer.NULL;
-        htmlToPdf = null;
-        System.gc();
-        PdfUtil.close();
+        System.runFinalization();
     }
 
     public byte[] convert(PdfDocument doc, String html) {
@@ -91,9 +85,19 @@ public class FastHtmlToPdf implements Closeable {
             htmlToPdf.wkhtmltopdf_set_global_setting(global_settings, "margin.right", doc.getMarginRight() * 0.04 + "cm");
 
         htmlToPdf.wkhtmltopdf_add_object(converter, object_settings, html.getBytes(StandardCharsets.UTF_8));
+        htmlToPdf.wkhtmltopdf_set_warning_callback(converter, (c, s) -> System.out.println(s));
+        htmlToPdf.wkhtmltopdf_set_error_callback(converter, (c, s) -> System.out.println(s));
+        htmlToPdf.wkhtmltopdf_set_progress_changed_callback(converter, (c, phaseProgress) -> {
+            int phase = htmlToPdf.wkhtmltopdf_current_phase(c);
+            int totalPhases = htmlToPdf.wkhtmltopdf_phase_count(c);
+            String phaseDesc = htmlToPdf.wkhtmltopdf_phase_description(c, phase);
+        });
 
-        if (htmlToPdf.wkhtmltopdf_convert(converter) != 0) {
+        htmlToPdf.wkhtmltopdf_set_finished_callback(converter, (c, i) -> { });
+
+        if (htmlToPdf.wkhtmltopdf_convert(converter) == 1) {
             PointerByReference pointerByReference = new PointerByReference();
+            ByteByReference aa=new ByteByReference();
             long len = htmlToPdf.wkhtmltopdf_get_output(converter, pointerByReference);
             byte[] result = pointerByReference.getValue().getByteArray(0, (int) len);
             pointerByReference.setValue(Pointer.NULL);
@@ -160,22 +164,18 @@ public class FastHtmlToPdf implements Closeable {
 }
 
 class PdfUtil {
-    public static synchronized void close() {
-        File file = new File(String.format("%s\\FastHtmlToPdf", System.getProperty("java.io.tmpdir")));
-        if (file.exists())
-            Arrays.stream(file.listFiles()).forEach(a -> {
-                a.delete();
-            });
-    }
-
     public static synchronized void create(String fileName, String zipName) {
         URL url = Thread.currentThread().getContextClassLoader().getResource("wkhtmltox.zip");
         File file = new File(String.format("%s\\FastHtmlToPdf", System.getProperty("java.io.tmpdir")));
         if (!file.exists())
             file.mkdirs();
 
+        file = new File(fileName);
+        if (file.exists())
+            return;
+
         assert url != null;
-        if(url.getPath().contains("BOOT-INF")) {
+        if (url.getPath().contains("BOOT-INF")) {
             try {
                 Enumeration<URL> list = Thread.currentThread().getContextClassLoader().getResources("META-INF");
                 while (list.hasMoreElements()) {
@@ -195,6 +195,9 @@ class PdfUtil {
 
         if ("jar".equals(url.getProtocol()))
             jarZip(url, fileName, zipName);
+
+        file = new File(zipName);
+        file.delete();
     }
 
     private static void fileZip(URL url, String fileName) {
