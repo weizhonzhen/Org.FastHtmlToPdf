@@ -4,54 +4,67 @@ import Org.FastHtmlToPdf.Interop.HtmlToPdf;
 import Org.FastHtmlToPdf.Model.PdfDocument;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
-import com.sun.jna.ptr.ByteByReference;
 import com.sun.jna.ptr.PointerByReference;
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.JarURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.*;
+import java.util.Enumeration;
+import java.util.Locale;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-public class FastHtmlToPdf implements Closeable {
-    private HtmlToPdf htmlToPdf = null;
-    private Pointer global_settings = Pointer.NULL;
-    private Pointer converter = Pointer.NULL;
-    private Pointer object_settings = Pointer.NULL;
-    private String fileName = String.format("%sFastHtmlToPdf\\wkhtmltox.dll", System.getProperty("java.io.tmpdir"));
-    private String zipName = String.format("%sFastHtmlToPdf\\wkhtmltox.zip", System.getProperty("java.io.tmpdir"));
+public final class FastHtmlToPdf {
+    private static HtmlToPdf htmlToPdf = null;
+    private static Pointer global_settings = Pointer.NULL;
+    private static Pointer converter = Pointer.NULL;
+    private static Pointer object_settings = Pointer.NULL;
+    private final static ExecutorService ex = Executors.newFixedThreadPool(1);
 
-    public FastHtmlToPdf() {
-        PdfUtil.create(fileName, zipName);
-        htmlToPdf = Native.load(fileName, HtmlToPdf.class);
-        htmlToPdf.wkhtmltopdf_init(0);
-        global_settings = htmlToPdf.wkhtmltopdf_create_global_settings();
-        converter = htmlToPdf.wkhtmltopdf_create_converter(global_settings);
-
-        object_settings = htmlToPdf.wkhtmltopdf_create_object_settings();
-
-        htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "web.defaultEncoding", "utf-8");
-        htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "web.loadImages", "true");
-        htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "web.enableJavascript", "true");
-        htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.jsdelay", "1000");
-        htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.loadErrorHandling", "skip");
-        htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.debugJavascript", "true");
+    public static byte[] convert(PdfDocument doc, String html) {
+        try {
+            Future<byte[]> result = ex.submit(new FastHtmlToPdf.TaskResult(doc, html));
+            return (byte[]) result.get();
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            return null;
+        }
     }
 
-    @Override
-    public void close() {
-        if (converter != Pointer.NULL)
-            htmlToPdf.wkhtmltopdf_destroy_converter(converter);
-        System.runFinalization();
+    private static void create() throws Exception {
+        if (htmlToPdf == null) {
+            htmlToPdf = (new PdfUtil()).create();
+            htmlToPdf.wkhtmltopdf_init(0);
+            global_settings = htmlToPdf.wkhtmltopdf_create_global_settings();
+            converter = htmlToPdf.wkhtmltopdf_create_converter(global_settings);
+            object_settings = htmlToPdf.wkhtmltopdf_create_object_settings();
+
+            htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "web.defaultEncoding", "utf-8");
+            htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "web.loadImages", "true");
+            htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "web.enableJavascript", "true");
+            htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.jsdelay", "1000");
+            htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.loadErrorHandling", "skip");
+            htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.debugJavascript", "true");
+        } else {
+            global_settings = htmlToPdf.wkhtmltopdf_create_global_settings();
+            converter = htmlToPdf.wkhtmltopdf_create_converter(global_settings);
+            object_settings = htmlToPdf.wkhtmltopdf_create_object_settings();
+        }
     }
 
-    public byte[] convert(PdfDocument doc, String html) {
+    private static byte[] convertThread(PdfDocument doc, String html) throws Exception {
         if (doc == null)
             return null;
 
@@ -93,24 +106,31 @@ public class FastHtmlToPdf implements Closeable {
             String phaseDesc = htmlToPdf.wkhtmltopdf_phase_description(c, phase);
         });
 
-        htmlToPdf.wkhtmltopdf_set_finished_callback(converter, (c, i) -> { });
+        htmlToPdf.wkhtmltopdf_set_finished_callback(converter, (c, i) -> {
+            int phase = htmlToPdf.wkhtmltopdf_current_phase(c);
+            int totalPhases = htmlToPdf.wkhtmltopdf_phase_count(c);
+            String phaseDesc = htmlToPdf.wkhtmltopdf_phase_description(c, phase);
+        });
 
         if (htmlToPdf.wkhtmltopdf_convert(converter) == 1) {
             PointerByReference pointerByReference = new PointerByReference();
-            ByteByReference aa=new ByteByReference();
             long len = htmlToPdf.wkhtmltopdf_get_output(converter, pointerByReference);
-            byte[] result = pointerByReference.getValue().getByteArray(0, (int) len);
-            pointerByReference.setValue(Pointer.NULL);
+            byte [] result = pointerByReference.getValue().getByteArray(0, (int) len);
+            htmlToPdf.wkhtmltopdf_destroy_converter(converter);
+            taskWait();
             return result;
-        } else
+        } else {
+            htmlToPdf.wkhtmltopdf_destroy_converter(converter);
+            taskWait();
             return null;
+        }
     }
 
-    private boolean isNullOrEmpty(String value) {
+    private static boolean isNullOrEmpty(String value) {
         return value == null || value.toString().equals("");
     }
 
-    private void initFooter(PdfDocument doc, HtmlToPdf htmlToPdf) {
+    private static void initFooter(PdfDocument doc, HtmlToPdf htmlToPdf) {
         if (doc.getFooter().getFontSize() != 0)
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "footer.fontSize", String.valueOf(doc.getFooter().getFontSize()));
 
@@ -136,7 +156,7 @@ public class FastHtmlToPdf implements Closeable {
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "footer.fontName", doc.getFooter().getFontName());
     }
 
-    private void initHeader(PdfDocument doc, HtmlToPdf htmlToPdf) {
+    private static void initHeader(PdfDocument doc, HtmlToPdf htmlToPdf) {
         if (doc.getHeader().getFontSize() != 0)
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "header.fontSize", String.valueOf(doc.getHeader().getFontSize()));
 
@@ -161,94 +181,123 @@ public class FastHtmlToPdf implements Closeable {
         if (!isNullOrEmpty(doc.getHeader().getFontName()))
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "header.fontName", doc.getHeader().getFontName());
     }
-}
 
-class PdfUtil {
-    public static synchronized void create(String fileName, String zipName) {
-        URL url = Thread.currentThread().getContextClassLoader().getResource("wkhtmltox.zip");
-        File file = new File(String.format("%s\\FastHtmlToPdf", System.getProperty("java.io.tmpdir")));
-        if (!file.exists())
-            file.mkdirs();
+    private static void taskWait() throws Exception {
+        int num =(new Random()).nextInt(2) + 4;
+        Thread.sleep(1000 * num);
+    }
 
-        file = new File(fileName);
-        if (file.exists())
-            return;
+    private static class TaskResult implements Callable<byte[]> {
+        private PdfDocument doc;
+        private String html;
 
-        assert url != null;
-        if (url.getPath().contains("BOOT-INF")) {
+        public TaskResult(PdfDocument doc, String html) {
+            this.doc = doc;
+            this.html = html;
+        }
+
+        @Override
+        public byte[] call() throws Exception {
+            create();
+            return FastHtmlToPdf.convertThread(doc, html);
+        }
+    }
+
+    static class PdfUtil {
+        private String fileName = String.format("%sFastHtmlToPdf\\wkhtmltox.dll", System.getProperty("java.io.tmpdir"));
+        private String zipName = String.format("%sFastHtmlToPdf\\wkhtmltox.zip", System.getProperty("java.io.tmpdir"));
+
+        public HtmlToPdf create() throws Exception {
+           if(!System.getProperty("os.name").toLowerCase().startsWith("win"))
+               throw new Exception("FastHtmlToPdf is on Windows");
+
+            URL url = Thread.currentThread().getContextClassLoader().getResource("wkhtmltox.zip");
+            File file = new File(String.format("%s\\FastHtmlToPdf", System.getProperty("java.io.tmpdir")));
+            if (!file.exists())
+                file.mkdirs();
+
+            file = new File(fileName);
+            if (file.exists())
+                return Native.load(fileName, HtmlToPdf.class);
+
+            assert url != null;
+            if (url.getPath().contains("BOOT-INF")) {
+                try {
+                    Enumeration<URL> list = Thread.currentThread().getContextClassLoader().getResources("META-INF");
+                    while (list.hasMoreElements()) {
+                        url = list.nextElement();
+                        if (url.getPath().contains("org.FastHtmlToPdf")) {
+                            jarZip(url, fileName, zipName);
+                            break;
+                        }
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            if ("file".equals(url.getProtocol()))
+                fileZip(url, fileName);
+
+            if ("jar".equals(url.getProtocol()))
+                jarZip(url, fileName, zipName);
+
+            file = new File(zipName);
+            file.delete();
+
+            return Native.load(fileName, HtmlToPdf.class);
+        }
+
+        private void fileZip(URL url, String fileName) {
             try {
-                Enumeration<URL> list = Thread.currentThread().getContextClassLoader().getResources("META-INF");
+                String zipName = URLDecoder.decode(url.getFile(), "UTF-8");
+                try (ZipFile zip = new ZipFile(zipName)) {
+                    Enumeration list = zip.entries();
+                    while (list.hasMoreElements()) {
+                        ZipEntry entry = (ZipEntry) list.nextElement();
+                        if (entry.getName().contains(System.getProperty("sun.arch.data.model"))) {
+                            InputStream in = zip.getInputStream(entry);
+                            File file = new File(fileName);
+                            Files.copy(in, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                            in.close();
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        }
+
+        private void jarZip(URL url, String fileName, String zipName) {
+            try {
+                JarFile jarFile = ((JarURLConnection) url.openConnection()).getJarFile();
+                Enumeration<JarEntry> list = jarFile.entries();
                 while (list.hasMoreElements()) {
-                    url = list.nextElement();
-                    if (url.getPath().contains("org.FastHtmlToPdf")) {
-                        jarZip(url, fileName, zipName);
+                    JarEntry jarEntry = list.nextElement();
+                    if (jarEntry.getName().equals("wkhtmltox.zip")) {
+                        InputStream in = Thread.currentThread().getContextClassLoader().getResourceAsStream(jarEntry.getName());
+                        File zipfile = new File(zipName);
+                        Files.copy(in, zipfile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                        in.close();
                         break;
                     }
                 }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-
-        if ("file".equals(url.getProtocol()))
-            fileZip(url, fileName);
-
-        if ("jar".equals(url.getProtocol()))
-            jarZip(url, fileName, zipName);
-
-        file = new File(zipName);
-        file.delete();
-    }
-
-    private static void fileZip(URL url, String fileName) {
-        try {
-            String zipName = URLDecoder.decode(url.getFile(), "UTF-8");
-            try (ZipFile zip = new ZipFile(zipName)) {
-                Enumeration list = zip.entries();
-                while (list.hasMoreElements()) {
-                    ZipEntry entry = (ZipEntry) list.nextElement();
-                    if (entry.getName().contains(System.getProperty("sun.arch.data.model"))) {
-                        InputStream in = zip.getInputStream(entry);
+                ZipFile zip = new ZipFile(zipName);
+                Enumeration zipList = zip.entries();
+                while (zipList.hasMoreElements()) {
+                    ZipEntry zipEntry = (ZipEntry) zipList.nextElement();
+                    if (zipEntry.getName().contains(System.getProperty("sun.arch.data.model"))) {
+                        InputStream in = zip.getInputStream(zipEntry);
                         File file = new File(fileName);
                         Files.copy(in, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
                         in.close();
+                        break;
                     }
                 }
+                zip.close();
+            } catch (Exception ex) {
+                ex.printStackTrace();
             }
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
-    }
-
-    private static void jarZip(URL url, String fileName, String zipName) {
-        try {
-            JarFile jarFile = ((JarURLConnection) url.openConnection()).getJarFile();
-            Enumeration<JarEntry> list = jarFile.entries();
-            while (list.hasMoreElements()) {
-                JarEntry jarEntry = list.nextElement();
-                if (jarEntry.getName().equals("wkhtmltox.zip")) {
-                    InputStream in = Thread.currentThread().getContextClassLoader().getResourceAsStream(jarEntry.getName());
-                    File zipfile = new File(zipName);
-                    Files.copy(in, zipfile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                    in.close();
-                    break;
-                }
-            }
-            ZipFile zip = new ZipFile(zipName);
-            Enumeration zipList = zip.entries();
-            while (zipList.hasMoreElements()) {
-                ZipEntry zipEntry = (ZipEntry) zipList.nextElement();
-                if (zipEntry.getName().contains(System.getProperty("sun.arch.data.model"))) {
-                    InputStream in = zip.getInputStream(zipEntry);
-                    File file = new File(fileName);
-                    Files.copy(in, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                    in.close();
-                    break;
-                }
-            }
-            zip.close();
-        } catch (Exception ex) {
-            ex.printStackTrace();
         }
     }
 }
