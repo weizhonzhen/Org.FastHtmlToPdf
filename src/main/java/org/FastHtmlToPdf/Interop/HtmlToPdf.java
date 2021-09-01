@@ -6,8 +6,7 @@ import com.sun.jna.Pointer;
 import com.sun.jna.ptr.PointerByReference;
 
 public interface HtmlToPdf extends Library {
-
-    interface StringCallback extends Callback {
+     interface StringCallback extends Callback {
         void callback(Pointer converter, String str);
     }
 
