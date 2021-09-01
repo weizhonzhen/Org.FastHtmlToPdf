@@ -1,11 +1,8 @@
 # Org.FastHtmlToPdf
 ```csharp
-try (var pdf = new FastHtmlToImage()) {
     var doc = new ImageDocument();
-    var result = pdf.convert(doc, html);
-}
+    var result = FastHtmlToImage.convert(doc, html);
 
-try (var pdf = new FastHtmlToPdf()) {
     var doc = new PdfDocument();
     var header = new Header();
     header.setLine(true);
@@ -19,6 +16,5 @@ try (var pdf = new FastHtmlToPdf()) {
     footer.setCenter("头部22dadasd22asdada2头部");
     doc.setFooter(footer);
 
-    var result = pdf.convert(doc, html);
-}
+    var result = FastHtmlToPdf.convert(doc, html);
 ```
