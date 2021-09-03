@@ -15,38 +15,37 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Enumeration;
-import java.util.Locale;
 import java.util.Random;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public final class FastHtmlToPdf {
-    private static HtmlToPdf htmlToPdf = null;
-    private static Pointer global_settings = Pointer.NULL;
-    private static Pointer converter = Pointer.NULL;
-    private static Pointer object_settings = Pointer.NULL;
-    private final static ExecutorService ex = Executors.newFixedThreadPool(1);
+    private static volatile HtmlToPdf htmlToPdf = null;
+    private static volatile Pointer global_settings = Pointer.NULL;
+    private static volatile Pointer converter = Pointer.NULL;
+    private static volatile Pointer object_settings = Pointer.NULL;
+    private static volatile ExecutorService ex = Executors.newFixedThreadPool(1);
 
-    public static byte[] convert(PdfDocument doc, String html) {
+    public static synchronized byte[] convert(PdfDocument doc, String html) {
         try {
             Future<byte[]> result = ex.submit(new FastHtmlToPdf.TaskResult(doc, html));
-            return (byte[]) result.get();
+            return (byte[])result.get();
         } catch (Exception ex) {
             ex.printStackTrace();
             return null;
         }
     }
 
-    private static void create() throws Exception {
-        if (htmlToPdf == null) {
-            htmlToPdf = (new PdfUtil()).create();
-            htmlToPdf.wkhtmltopdf_init(0);
+    private static void create() {
+        try {
+            if (htmlToPdf == null) {
+                htmlToPdf = (new PdfUtil()).create();
+                htmlToPdf.wkhtmltopdf_init(0);
+            }
+
             global_settings = htmlToPdf.wkhtmltopdf_create_global_settings();
             converter = htmlToPdf.wkhtmltopdf_create_converter(global_settings);
             object_settings = htmlToPdf.wkhtmltopdf_create_object_settings();
@@ -57,10 +56,8 @@ public final class FastHtmlToPdf {
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.jsdelay", "1000");
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.loadErrorHandling", "skip");
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "load.debugJavascript", "true");
-        } else {
-            global_settings = htmlToPdf.wkhtmltopdf_create_global_settings();
-            converter = htmlToPdf.wkhtmltopdf_create_converter(global_settings);
-            object_settings = htmlToPdf.wkhtmltopdf_create_object_settings();
+        } catch (Exception ex) {
+            ex.printStackTrace();
         }
     }
 
@@ -115,12 +112,13 @@ public final class FastHtmlToPdf {
         if (htmlToPdf.wkhtmltopdf_convert(converter) == 1) {
             PointerByReference pointerByReference = new PointerByReference();
             long len = htmlToPdf.wkhtmltopdf_get_output(converter, pointerByReference);
-            byte [] result = pointerByReference.getValue().getByteArray(0, (int) len);
+            byte[] result = pointerByReference.getValue().getByteArray(0, (int) len);
+            htmlToPdf.wkhtmltopdf_destroy_global_settings(global_settings);
+            htmlToPdf.wkhtmltopdf_destroy_object_settings(object_settings);
             htmlToPdf.wkhtmltopdf_destroy_converter(converter);
             taskWait();
             return result;
         } else {
-            htmlToPdf.wkhtmltopdf_destroy_converter(converter);
             taskWait();
             return null;
         }
@@ -182,9 +180,15 @@ public final class FastHtmlToPdf {
             htmlToPdf.wkhtmltopdf_set_object_setting(object_settings, "header.fontName", doc.getHeader().getFontName());
     }
 
-    private static void taskWait() throws Exception {
-        int num =(new Random()).nextInt(2) + 4;
-        Thread.sleep(1000 * num);
+    private static void taskWait() {
+        try {
+            int num =(new Random()).nextInt(2) + 4;
+            Thread.sleep(1000 * num);
+        }
+        catch (Exception ex)
+        {
+            ex.printStackTrace();
+        }
     }
 
     private static class TaskResult implements Callable<byte[]> {
@@ -217,7 +221,7 @@ public final class FastHtmlToPdf {
                 file.mkdirs();
 
             file = new File(fileName);
-            if (file.exists())
+            if (file.exists() && !file.delete())
                 return Native.load(fileName, HtmlToPdf.class);
 
             assert url != null;

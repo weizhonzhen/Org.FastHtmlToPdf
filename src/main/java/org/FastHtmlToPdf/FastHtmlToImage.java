@@ -27,12 +27,12 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public final class FastHtmlToImage {
-    private static HtmlToImage htmlToImage = null;
-    private static Pointer global_settings = Pointer.NULL;
-    private static Pointer converter = Pointer.NULL;
-    private final static ExecutorService ex = Executors.newFixedThreadPool(1);
+    private static volatile HtmlToImage htmlToImage = null;
+    private static volatile Pointer global_settings = Pointer.NULL;
+    private static volatile Pointer converter = Pointer.NULL;
+    private static volatile ExecutorService ex = Executors.newFixedThreadPool(1);
 
-    public static byte[] convert(ImageDocument doc, String html) {
+    public static synchronized byte[] convert(ImageDocument doc, String html) {
         try {
             Future<byte[]> result = ex.submit(new FastHtmlToImage.TaskResult(doc, html));
             return (byte[]) result.get();
@@ -125,7 +125,7 @@ public final class FastHtmlToImage {
                 file.mkdirs();
 
             file = new File(fileName);
-            if (file.exists())
+            if (file.exists() && !file.delete())
                 return Native.load(fileName, HtmlToImage.class);
 
             assert url != null;
