@@ -17,10 +17,9 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Enumeration;
 import java.util.Random;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
@@ -30,12 +29,13 @@ public final class FastHtmlToImage {
     private static volatile HtmlToImage htmlToImage = null;
     private static volatile Pointer global_settings = Pointer.NULL;
     private static volatile Pointer converter = Pointer.NULL;
-    private static volatile ExecutorService ex = Executors.newFixedThreadPool(1);
+    private static volatile CompletionService completionService =new  ExecutorCompletionService<byte[]>(Executors.newSingleThreadExecutor());
+    private final static Lock lock= new ReentrantLock();
 
-    public static synchronized byte[] convert(ImageDocument doc, String html) {
+    public static byte[] convert(ImageDocument doc, String html) {
         try {
-            Future<byte[]> result = ex.submit(new FastHtmlToImage.TaskResult(doc, html));
-            return (byte[]) result.get();
+            completionService.submit(new FastHtmlToImage.TaskResult(doc, html));
+            return (byte[]) completionService.take().get();
         } catch (Exception ex) {
             ex.printStackTrace();
             return null;
@@ -102,13 +102,19 @@ public final class FastHtmlToImage {
 
         @Override
         public byte[] call() throws Exception {
-            FastHtmlToImage.create();
-            return FastHtmlToImage.convertThread(doc, html);
+            try {
+                lock.lock();
+                create();
+                return FastHtmlToImage.convertThread(doc, html);
+            }
+            finally {
+                lock.unlock();
+            }
         }
     }
 
     private static void taskWait() throws Exception {
-        int num =(new Random()).nextInt(2) + 4;
+        int num =(new Random()).nextInt(2) + 5;
         Thread.sleep(1000 * num);
     }
 
