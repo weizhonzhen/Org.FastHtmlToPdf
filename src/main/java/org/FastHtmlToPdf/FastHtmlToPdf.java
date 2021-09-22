@@ -29,13 +29,14 @@ public final class FastHtmlToPdf {
     private static volatile Pointer global_settings = Pointer.NULL;
     private static volatile Pointer converter = Pointer.NULL;
     private static volatile Pointer object_settings = Pointer.NULL;
-    private static volatile  CompletionService completionService =new  ExecutorCompletionService<byte[]>(Executors.newSingleThreadExecutor());
-    private final static Lock lock= new ReentrantLock();
+    private final static CompletionService<byte[]> completionService = new ExecutorCompletionService<>(Executors.newSingleThreadExecutor());
+    private final static Lock lock = new ReentrantLock();
+    private final static BlockingQueue<Future<byte[]>> queue = new LinkedBlockingQueue<>();
 
     public static byte[] convert(PdfDocument doc, String html) {
         try {
-            completionService.submit(new FastHtmlToPdf.TaskResult(doc, html));
-            return (byte[]) completionService.take().get();
+            queue.add(completionService.submit(new FastHtmlToPdf.TaskResult(doc, html)));
+            return queue.take().get();
         } catch (Exception ex) {
             ex.printStackTrace();
             return null;
@@ -185,11 +186,9 @@ public final class FastHtmlToPdf {
 
     private static void taskWait() {
         try {
-            int num =(new Random()).nextInt(2) + 5;
+            int num = (new Random()).nextInt(2) + 5;
             Thread.sleep(1000 * num);
-        }
-        catch (Exception ex)
-        {
+        } catch (Exception ex) {
             ex.printStackTrace();
         }
     }
@@ -209,8 +208,7 @@ public final class FastHtmlToPdf {
                 lock.lock();
                 create();
                 return FastHtmlToPdf.convertThread(doc, html);
-            }
-            finally {
+            } finally {
                 lock.unlock();
             }
         }
@@ -221,8 +219,8 @@ public final class FastHtmlToPdf {
         private String zipName = String.format("%sFastHtmlToPdf\\wkhtmltox.zip", System.getProperty("java.io.tmpdir"));
 
         public HtmlToPdf create() throws Exception {
-           if(!System.getProperty("os.name").toLowerCase().startsWith("win"))
-               throw new Exception("FastHtmlToPdf is on Windows");
+            if (!System.getProperty("os.name").toLowerCase().startsWith("win"))
+                throw new Exception("FastHtmlToPdf is on Windows");
 
             URL url = Thread.currentThread().getContextClassLoader().getResource("wkhtmltox.zip");
             File file = new File(String.format("%s\\FastHtmlToPdf", System.getProperty("java.io.tmpdir")));

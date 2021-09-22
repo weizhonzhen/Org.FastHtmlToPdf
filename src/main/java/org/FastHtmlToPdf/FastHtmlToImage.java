@@ -29,13 +29,14 @@ public final class FastHtmlToImage {
     private static volatile HtmlToImage htmlToImage = null;
     private static volatile Pointer global_settings = Pointer.NULL;
     private static volatile Pointer converter = Pointer.NULL;
-    private static volatile CompletionService completionService =new  ExecutorCompletionService<byte[]>(Executors.newSingleThreadExecutor());
+    private static volatile CompletionService<byte[]> completionService =new  ExecutorCompletionService(Executors.newSingleThreadExecutor());
     private final static Lock lock= new ReentrantLock();
+    private final static BlockingQueue<Future<byte[]>> queue = new LinkedBlockingQueue<>();
 
     public static byte[] convert(ImageDocument doc, String html) {
         try {
-            completionService.submit(new FastHtmlToImage.TaskResult(doc, html));
-            return (byte[]) completionService.take().get();
+            queue.add(completionService.submit(new FastHtmlToImage.TaskResult(doc, html)));
+            return queue.take().get();
         } catch (Exception ex) {
             ex.printStackTrace();
             return null;
