@@ -30,8 +30,7 @@ public final class FastHtmlToPdf {
     private static volatile Pointer converter = Pointer.NULL;
     private static volatile Pointer object_settings = Pointer.NULL;
     private final static CompletionService<byte[]> completionService = new ExecutorCompletionService<>(Executors.newSingleThreadExecutor());
-    private final static Lock lock = new ReentrantLock();
-    private final static BlockingQueue<Future<byte[]>> queue = new LinkedBlockingQueue<>();
+    private final static BlockingQueue<Future<byte[]>> queue = new ArrayBlockingQueue<>(1000);
 
     public static byte[] convert(PdfDocument doc, String html) {
         try {
@@ -204,13 +203,8 @@ public final class FastHtmlToPdf {
 
         @Override
         public byte[] call() throws Exception {
-            try {
-                lock.lock();
-                create();
-                return FastHtmlToPdf.convertThread(doc, html);
-            } finally {
-                lock.unlock();
-            }
+            create();
+            return FastHtmlToPdf.convertThread(doc, html);
         }
     }
 

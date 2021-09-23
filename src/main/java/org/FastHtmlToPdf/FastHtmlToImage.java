@@ -18,8 +18,6 @@ import java.nio.file.StandardCopyOption;
 import java.util.Enumeration;
 import java.util.Random;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
@@ -30,8 +28,7 @@ public final class FastHtmlToImage {
     private static volatile Pointer global_settings = Pointer.NULL;
     private static volatile Pointer converter = Pointer.NULL;
     private static volatile CompletionService<byte[]> completionService =new  ExecutorCompletionService(Executors.newSingleThreadExecutor());
-    private final static Lock lock= new ReentrantLock();
-    private final static BlockingQueue<Future<byte[]>> queue = new LinkedBlockingQueue<>();
+    private final static BlockingQueue<Future<byte[]>> queue = new ArrayBlockingQueue<>(1000);
 
     public static byte[] convert(ImageDocument doc, String html) {
         try {
@@ -103,14 +100,8 @@ public final class FastHtmlToImage {
 
         @Override
         public byte[] call() throws Exception {
-            try {
-                lock.lock();
-                create();
-                return FastHtmlToImage.convertThread(doc, html);
-            }
-            finally {
-                lock.unlock();
-            }
+            create();
+            return FastHtmlToImage.convertThread(doc, html);
         }
     }
 
