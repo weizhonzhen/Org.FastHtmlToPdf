@@ -17,8 +17,6 @@ import java.nio.file.StandardCopyOption;
 import java.util.Enumeration;
 import java.util.Random;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
